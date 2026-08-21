@@ -1,0 +1,19 @@
+{
+  "name": "agentic-supply-chain-orchestrator",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Autonomous supply-chain disruption monitoring, Monte Carlo simulation and HITL-governed rerouting, with a browser dashboard.",
+  "scripts": {
+    "start": "node scripts/start.mjs",
+    "dev": "node scripts/start.mjs",
+    "setup": "python -m pip install -r requirements.txt && npm --prefix web install",
+    "api": "node scripts/api-only.mjs",
+    "web": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
+    "test": "node scripts/test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

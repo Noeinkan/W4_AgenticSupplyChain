@@ -1,142 +1,155 @@
 """
-LangGraph supply-chain agent graph definition.
+Optional LangGraph binding.
 
-Topology:
-  START → monitor → analyzer → simulator → recommender → hitl_gate → executor → END
-                                                               ↑ reject (max 3x)
-                                                           ←───┘ reanalyze loop
+    START -> monitor -> analyzer -> simulator -> recommender -> hitl_gate -> executor -> END
+                                        ^                           |
+                                        +------- reject loop -------+
 
-Key design decisions:
-- interrupt_before=["hitl_gate"]: graph pauses before hitl_gate fires so the
-  governance API can inject a human decision via graph.aupdate_state() then resume.
-- AsyncPostgresSaver checkpointer: state survives restarts; 24h approval windows work.
-- Conditional edge after hitl_gate: approve→executor, reject→analyzer (loop), timeout→END.
+This is a *binding*, not a second implementation: every node delegates to the
+same functions in :mod:`orchestrator.pipeline.nodes` that the native runner
+uses. Previously the two diverged, and this side had grown a hard
+``langchain_core`` import that broke on a clean install.
+
+The native runner in :mod:`orchestrator.pipeline.runner` is the default and
+needs no extra packages. Set ``USE_LANGGRAPH=true`` to use this instead, which
+buys durable Postgres checkpointing - graph state survives a restart, so a 48h
+c-suite approval window outlives a deploy. It requires ``langgraph`` and, for
+persistence, ``langgraph-checkpoint-postgres``.
 """
+
+from __future__ import annotations
 
 import logging
 from typing import Literal
 
-from langgraph.graph import END, StateGraph
-
-from orchestrator.agents import nodes
-from orchestrator.agents.nodes import (
-    analyzer,
-    executor,
-    hitl_gate,
-    monitor,
-    recommender,
-    simulator,
-)
-from orchestrator.agents.state import SupplyChainState
+from orchestrator.pipeline import nodes
 
 logger = logging.getLogger(__name__)
 
 
-def _route_after_hitl(
-    state: SupplyChainState,
-) -> Literal["executor", "analyzer", "__end__"]:
-    """Conditional edge: decide where to go after the HITL gate."""
+async def _monitor(state: dict) -> dict:
+    from orchestrator.data.catalog import get_catalog
+
+    working = dict(state)
+    await nodes.monitor(working, await get_catalog())
+    return {"active_events": working["active_events"], "risk_scores": working["risk_scores"],
+            "narrative": working.get("narrative", "")}
+
+
+async def _analyzer(state: dict) -> dict:
+    from orchestrator.data.catalog import get_catalog
+
+    working = dict(state)
+    await nodes.analyzer(working, await get_catalog())
+    return {"affected_suppliers": working["affected_suppliers"],
+            "affected_routes": working["affected_routes"],
+            "esg_baseline": working["esg_baseline"]}
+
+
+async def _simulator(state: dict) -> dict:
+    from orchestrator.data.catalog import get_catalog
+
+    working = dict(state)
+    await nodes.simulator(working, await get_catalog())
+    return {"scenarios": working["scenarios"], "simulation_results": working["simulation_results"]}
+
+
+async def _recommender(state: dict) -> dict:
+    from orchestrator.data.catalog import get_catalog
+
+    working = dict(state)
+    await nodes.recommender(working, await get_catalog())
+    return {"recommendations": working["recommendations"],
+            "selected_recommendation": working["selected_recommendation"],
+            "esg_projected": working.get("esg_projected", {})}
+
+
+async def _hitl_gate(state: dict) -> dict:
+    working = dict(state)
+    nodes.hitl_gate(working)
+    return {"hitl_required": working["hitl_required"], "hitl_decision": working["hitl_decision"],
+            "hitl_tier": working["hitl_tier"],
+            "approval_timeout_seconds": working["approval_timeout_seconds"],
+            "selected_recommendation": working.get("selected_recommendation")}
+
+
+async def _executor(state: dict) -> dict:
+    working = dict(state)
+    await nodes.executor(working)
+    return {"execution_status": working["execution_status"],
+            "execution_log": working["execution_log"]}
+
+
+def _route_after_hitl(state: dict) -> Literal["executor", "increment_iter", "__end__"]:
+    """approve -> execute, reject -> re-analyse (bounded), anything else -> stop."""
+    from langgraph.graph import END
+
     if state.get("error"):
         return END
-
     decision = state.get("hitl_decision")
-    iteration = state.get("iteration_count", 0)
-    max_iter = state.get("max_iterations", 3)
-
     if decision == "approve":
         return "executor"
-
     if decision == "reject":
-        if iteration >= max_iter:
-            logger.warning("Max iterations (%d) reached — ending pipeline", max_iter)
+        if state.get("iteration_count", 0) >= state.get("max_iterations", 3):
+            logger.warning("Max re-analysis iterations reached - ending pipeline")
             return END
-        return "analyzer"
-
-    # None = still waiting for human / timeout
-    logger.info("HITL: no decision yet or timeout — ending pipeline")
+        return "increment_iter"
     return END
 
 
-def _increment_iteration(state: SupplyChainState) -> dict:
-    """Small pass-through node that bumps the loop counter."""
-    return {"iteration_count": state.get("iteration_count", 0) + 1}
+def _increment_iteration(state: dict) -> dict:
+    return {"iteration_count": state.get("iteration_count", 0) + 1, "hitl_decision": None}
 
 
 def build_graph(checkpointer=None):
-    """
-    Build and compile the LangGraph.
+    """Compile the graph. ``interrupt_before`` on the gate is what enables HITL."""
+    from langgraph.graph import END, StateGraph
 
-    Args:
-        checkpointer: An AsyncPostgresSaver instance (from langgraph-checkpoint-postgres).
-                      Pass None for testing without persistence.
+    from orchestrator.agents.state import SupplyChainState
 
-    Returns:
-        Compiled LangGraph ready for .astream() or .ainvoke().
-    """
     graph = StateGraph(SupplyChainState)
-
-    # Register nodes
-    graph.add_node("monitor", monitor.run)
-    graph.add_node("analyzer", analyzer.run)
-    graph.add_node("simulator", simulator.run)
-    graph.add_node("recommender", recommender.run)
-    graph.add_node("hitl_gate", hitl_gate.run)
-    graph.add_node("executor", executor.run)
+    graph.add_node("monitor", _monitor)
+    graph.add_node("analyzer", _analyzer)
+    graph.add_node("simulator", _simulator)
+    graph.add_node("recommender", _recommender)
+    graph.add_node("hitl_gate", _hitl_gate)
+    graph.add_node("executor", _executor)
     graph.add_node("increment_iter", _increment_iteration)
 
-    # Linear execution path
     graph.set_entry_point("monitor")
     graph.add_edge("monitor", "analyzer")
     graph.add_edge("analyzer", "simulator")
     graph.add_edge("simulator", "recommender")
     graph.add_edge("recommender", "hitl_gate")
-
-    # After HITL: branch on human decision
     graph.add_conditional_edges(
-        "hitl_gate",
-        _route_after_hitl,
-        {
-            "executor": "executor",
-            "analyzer": "increment_iter",  # rejection loops back via counter
-            END: END,
-        },
+        "hitl_gate", _route_after_hitl,
+        {"executor": "executor", "increment_iter": "increment_iter", END: END},
     )
-
-    # Rejection loop: counter → back to analyzer for fresh recommendations
     graph.add_edge("increment_iter", "analyzer")
     graph.add_edge("executor", END)
 
     compile_kwargs: dict = {}
     if checkpointer:
         compile_kwargs["checkpointer"] = checkpointer
-        # Pause BEFORE hitl_gate so state is saved and API can inject decision
+        # Pause before the gate so state is durable and the API can inject a decision.
         compile_kwargs["interrupt_before"] = ["hitl_gate"]
-
     return graph.compile(**compile_kwargs)
 
 
 async def get_checkpointer():
-    """
-    Create an AsyncPostgresSaver for LangGraph state persistence.
-    Falls back to MemorySaver when DB isn't configured (dev/test).
-    """
+    """Postgres checkpointer, falling back to in-memory when unavailable."""
     from orchestrator.config import settings
 
     try:
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-        # Convert asyncpg URL to plain postgres URL for psycopg
-        pg_url = settings.database_url.replace(
-            "postgresql+asyncpg://", "postgresql://"
-        )
+        pg_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
         checkpointer = AsyncPostgresSaver.from_conn_string(pg_url)
         await checkpointer.setup()
-        logger.info("Using AsyncPostgresSaver for LangGraph checkpointing")
+        logger.info("LangGraph checkpointing to Postgres")
         return checkpointer
-    except Exception:
-        logger.warning(
-            "AsyncPostgresSaver unavailable — falling back to MemorySaver (no persistence)"
-        )
+    except Exception as exc:
+        logger.warning("Postgres checkpointer unavailable (%s) - using MemorySaver", exc)
         from langgraph.checkpoint.memory import MemorySaver
 
         return MemorySaver()

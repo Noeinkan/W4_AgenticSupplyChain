@@ -1,27 +1,36 @@
 """
-Pytest configuration and shared fixtures.
+Shared fixtures.
+
+Every test runs against the in-memory catalog with no LLM provider, so the suite
+needs no database, no API key and no network access.
 """
 
-import asyncio
+import os
 
 import pytest
 
-
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+os.environ.setdefault("DATA_BACKEND", "memory")
+os.environ.setdefault("LLM_PROVIDER", "none")
+os.environ.setdefault("ENABLE_INGESTION", "false")
 
 
 @pytest.fixture
 async def client():
-    """HTTP test client for the FastAPI app (requires httpx + fastapi installed)."""
-    try:
-        from httpx import ASGITransport, AsyncClient
-        from orchestrator.main import app
+    """ASGI test client bound directly to the FastAPI app (no live server)."""
+    from httpx import ASGITransport, AsyncClient
 
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-            yield ac
-    except ImportError:
-        pytest.skip("httpx or fastapi not installed")
+    from orchestrator.main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.fixture(autouse=True)
+def _reset_run_store():
+    """Each test gets a clean run registry, so audit assertions are not order-dependent."""
+    import orchestrator.pipeline.store as store_module
+
+    store_module._store = None
+    yield
+    store_module._store = None

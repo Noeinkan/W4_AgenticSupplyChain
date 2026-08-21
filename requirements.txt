@@ -1,0 +1,19 @@
+# Minimal runtime: this is all `npm start` needs.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+pydantic-settings>=2.3
+numpy>=1.26
+httpx>=0.27
+
+# Optional extras, all guarded at import time:
+#   pulp          -- exact LP oracle used by the allocator tests
+#   sqlalchemy    -- DATA_BACKEND=db
+#   asyncpg       -- DATA_BACKEND=db
+#   pgvector      -- semantic event search
+#   alembic       -- migrations
+#   apscheduler   -- ENABLE_INGESTION=true
+#   feedparser    -- RSS ingestion
+#   langgraph     -- USE_LANGGRAPH=true
+pulp>=2.8
+

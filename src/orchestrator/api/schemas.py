@@ -7,90 +7,94 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+Industry = Literal["fashion", "electronics", "automotive", "pharma", "other"]
 
-# ── Simulation ───────────────────────────────────────────────────────────────
+
+# -- Pipeline ------------------------------------------------------------------
 
 
 class ManufacturerProfile(BaseModel):
-    name: str
-    industry: Literal["fashion", "electronics", "automotive", "pharma", "other"] = "fashion"
-    hs_codes: list[str] = Field(min_length=1, max_length=20, examples=[["6104", "6201"]])
-    supplier_countries: list[str] = Field(examples=[["CN", "VN", "BD"]])
-    annual_volume_units: int = Field(gt=0, examples=[500_000])
-    min_esg_score: float = Field(default=50.0, ge=0, le=100)
-    n_iterations: int = Field(default=1000, ge=100, le=10_000)
+    name: str = Field(examples=["Northwind Apparel"])
+    industry: Industry = "fashion"
+    hs_codes: list[str] = Field(default_factory=lambda: ["6104"], max_length=20)
+    supplier_countries: list[str] = Field(default_factory=list, examples=[["VN", "BD", "IN"]])
+    annual_volume_units: int = Field(default=1_200_000, gt=0)
+    min_esg_score: float = Field(default=0.0, ge=0, le=100)
+    n_iterations: int = Field(default=1000, ge=100, le=50_000)
+    max_iterations: int = Field(default=3, ge=0, le=10)
 
 
-class TriggerSimulationRequest(BaseModel):
+class TriggerRunRequest(BaseModel):
     manufacturer_profile: ManufacturerProfile
-    auto_trigger_on_events: bool = True
 
 
-class SimulationStartResponse(BaseModel):
+class RunStartResponse(BaseModel):
     run_id: str
     thread_id: str
     status: str = "started"
-    message: str = "Simulation pipeline started in background"
 
 
-class SimulationStatusResponse(BaseModel):
-    run_id: str
-    status: Literal["pending", "running", "complete", "failed", "awaiting_approval"]
-    progress_pct: float = 0.0
-    created_at: datetime | None = None
-    completed_at: datetime | None = None
-    thread_id: str | None = None
-
-
-class SimulationResultResponse(BaseModel):
+class RunSummary(BaseModel):
     run_id: str
     thread_id: str
     status: str
-    scenario_results: list[dict]
-    recommendations: list[dict]
-    esg_summary: dict
+    progress_pct: float
+    manufacturer: str | None = None
+    industry: str | None = None
+    created_at: str
+    completed_at: str | None = None
+    duration_ms: float = 0.0
+    compute_ms: float = 0.0
+    scenario_count: int = 0
+    iterations: int = 0
     hitl_required: bool = False
+    hitl_tier: str | None = None
+    hitl_decision: str | None = None
+    top_recommendation: str | None = None
+    cost_delta_usd: float | None = None
+    error: str | None = None
 
 
-# ── Governance ───────────────────────────────────────────────────────────────
+class RunDetail(RunSummary):
+    profile: dict = Field(default_factory=dict)
+    risk_scores: dict = Field(default_factory=dict)
+    active_events: list[dict] = Field(default_factory=list)
+    affected_suppliers: list[dict] = Field(default_factory=list)
+    scenarios: list[dict] = Field(default_factory=list)
+    scenario_results: list[dict] = Field(default_factory=list)
+    recommendations: list[dict] = Field(default_factory=list)
+    selected_recommendation: dict | None = None
+    esg_baseline: dict = Field(default_factory=dict)
+    esg_projected: dict = Field(default_factory=dict)
+    execution_status: str | None = None
+    execution_log: list[str] = Field(default_factory=list)
+    narrative: str = ""
+    events: list[dict] = Field(default_factory=list)
 
 
-class GovernanceDecisionRequest(BaseModel):
-    thread_id: str
-    recommendation_id: str
+# -- Governance ----------------------------------------------------------------
+
+
+class DecisionRequest(BaseModel):
     decision: Literal["approve", "reject", "modify"]
-    approver: str = "api_user"
+    approver: str = "dashboard_user"
     notes: str | None = None
-    modified_config: dict | None = None
 
 
-class GovernanceDecisionResponse(BaseModel):
+class DecisionResponse(BaseModel):
+    run_id: str
     thread_id: str
     decision: str
     status: str
     message: str
 
 
-class PendingApproval(BaseModel):
-    recommendation_id: str
-    thread_id: str | None
-    rec_type: str
-    description: str | None
-    cost_delta_usd: float | None
-    risk_delta: float | None
-    esg_delta: float | None
-    confidence_pct: float | None
-    created_at: datetime | None
-
-
-# ── ESG ──────────────────────────────────────────────────────────────────────
+# -- ESG -----------------------------------------------------------------------
 
 
 class ESGReportRequest(BaseModel):
-    manufacturer_id: str | None = None
     supplier_ids: list[str] | None = None
-    scenario_id: str | None = None
-    standard: Literal["GRI", "SASB", "CDP", "custom"] = "GRI"
+    standard: Literal["GRI", "SASB", "raw"] = "GRI"
 
 
 class SupplierESGResponse(BaseModel):
@@ -103,11 +107,16 @@ class SupplierESGResponse(BaseModel):
     breakdown: dict
 
 
-# ── Health ───────────────────────────────────────────────────────────────────
+# -- Health --------------------------------------------------------------------
 
 
 class HealthResponse(BaseModel):
     status: str = "ok"
-    version: str = "0.1.0"
+    version: str
+    data_backend: str
+    supplier_count: int = 0
+    llm: dict = Field(default_factory=dict)
     db_connected: bool = False
-    ingestion_scheduler: bool = False
+    ingestion_enabled: bool = False
+    engine: str = "native"
+    server_time: datetime | None = None

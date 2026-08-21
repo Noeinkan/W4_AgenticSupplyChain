@@ -9,6 +9,10 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Data backend: "memory" needs nothing installed; "db" uses Postgres and
+    # silently falls back to memory when the database is unreachable.
+    data_backend: str = "memory"
+
     # Database
     database_url: str = "postgresql+asyncpg://scuser:scpassword@localhost:5432/supplychain"
     db_host: str = "localhost"
@@ -17,19 +21,28 @@ class Settings(BaseSettings):
     db_user: str = "scuser"
     db_password: str = "scpassword"
 
-    # LLM
-    anthropic_api_key: str = ""
-    openai_api_key: str = ""  # For text-embedding-ada-002
+    # LLM: one of none | ollama | gemini | openai | anthropic.
+    # "none" is fully deterministic and costs nothing.
+    llm_provider: str = "none"
+    llm_model: str = ""  # blank = provider default
 
-    # External data APIs
+    gemini_api_key: str = ""
+    google_api_key: str = ""  # accepted as an alias for gemini_api_key
+    anthropic_api_key: str = ""
+    openai_api_key: str = ""
+    openai_base_url: str = "https://api.openai.com/v1"
+
+    # External data APIs (optional; ingestion is disabled without them)
     comtrade_api_key: str = ""
     openweathermap_api_key: str = ""
     newsapi_key: str = ""
     marine_traffic_api_key: str = ""
+    enable_ingestion: bool = False
 
     # App settings
     debug: bool = False
     log_level: str = "INFO"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     # HITL governance
     default_approval_timeout_hours: int = 24
@@ -37,12 +50,19 @@ class Settings(BaseSettings):
 
     # Simulation
     default_mc_iterations: int = 1000
-    max_mc_iterations: int = 10_000
+    max_mc_iterations: int = 50_000
 
-    # Sovereign / air-gapped mode
+    # Agent engine: the native pipeline runs without LangGraph installed.
+    use_langgraph: bool = False
+
+    # Sovereign / air-gapped mode: forces llm_provider to "ollama".
     sovereign_mode: bool = False
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3:70b"
+    ollama_model: str = "llama3.1:8b"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 settings = Settings()

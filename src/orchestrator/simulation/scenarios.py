@@ -1,6 +1,6 @@
 """
 Pre-built scenario templates for common supply-chain shocks.
-Each scenario is a dict consumed by monte_carlo.run_monte_carlo().
+Each scenario is a dict consumed by orchestrator.simulation.engine.run_scenario().
 
 Keys:
   id, name, event_type
