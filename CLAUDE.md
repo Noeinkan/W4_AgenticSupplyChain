@@ -24,6 +24,8 @@ ingestion and any LLM are all optional and guarded at import time.
 | Native streaming pipeline | `src/orchestrator/pipeline/runner.py` |
 | Run store + SSE fan-out | `src/orchestrator/pipeline/store.py` |
 | Data catalog (memory or Postgres) | `src/orchestrator/data/catalog.py` |
+| Live source registry | `src/orchestrator/ingestion/collector.py` |
+| Where ingested events land | `src/orchestrator/ingestion/sink.py` |
 | Swappable LLM backend | `src/orchestrator/llm/provider.py` |
 | FastAPI entry | `src/orchestrator/main.py` |
 | Settings | `src/orchestrator/config.py` |
@@ -63,6 +65,13 @@ Every path through `llm/provider.py` must degrade to the caller's fallback.
 **A run awaiting approval is never evicted from the store** — that would strand a
 governance decision.
 
+**Ingestion publishes through `ingestion/sink.py`, never straight to the DB.**
+The sink writes into `catalog.events`, which is what the monitor node reads, so
+live feeds work on the default in-memory backend; the Postgres write is a mirror
+and its failure is logged, not raised. Fetchers stay pure: a source module turns a
+decoded payload into event dicts and scores severity, and every ingestion test
+runs against a captured payload with no socket, key or database.
+
 ## HITL governance tiers
 | Cost delta | Tier | Window |
 |---|---|---|
@@ -77,7 +86,9 @@ governance decision.
 | `LLM_PROVIDER` | `none` | `none` \| `ollama` \| `gemini` \| `openai` \| `anthropic` |
 | `LLM_MODEL` | *(blank)* | Provider default when blank |
 | `USE_LANGGRAPH` | `false` | `true` needs `pip install langgraph` |
-| `ENABLE_INGESTION` | `false` | `true` needs `apscheduler` + API keys |
+| `ENABLE_INGESTION` | `false` | `true` starts the APScheduler loop (needs `apscheduler`). `POST /api/v1/ingestion/run` works either way |
+| `INGESTION_MAX_EVENTS` | `250` | Cap on live events held in the catalog |
+| `NOAA_USER_AGENT` | *(generic)* | NOAA throttles clients that do not identify themselves |
 | `SOVEREIGN_MODE` | `false` | Forces `LLM_PROVIDER=ollama` |
 
 ## Tech stack

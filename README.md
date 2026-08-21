@@ -36,19 +36,48 @@ tooltip. Charts are hand-built SVG — no charting library, no CDN.
 ## How it works
 
 ```
-Ingestion (optional)          Agent pipeline (per trigger)
-  NewsAPI / RSS      ──┐        monitor → analyzer → simulator → recommender
-  OpenWeatherMap     ──┼──→                                          │
-  UN Comtrade        ──┘                                    ┌────────┴────────┐
-                                                        auto-approve      [HITL gate]
-                                                            │                 │
-                                                            └────→ executor ←──┘
+Live ingestion                Agent pipeline (per trigger)
+  IMF PortWatch      ──┐        monitor → analyzer → simulator → recommender
+  NOAA NWS + NHC     ──┤                                             │
+  UN Comtrade        ──┼──→ catalog ──→                     ┌────────┴────────┐
+  NewsAPI / RSS      ──┤     events                     auto-approve      [HITL gate]
+  OpenWeatherMap     ──┘                                      │                 │
+                                                              └────→ executor ←──┘
 ```
 
 The pipeline streams over server-sent events, so the browser renders each node as
 it happens. At the HITL gate the run **suspends** — it stays parked in the store
 until a decision arrives, then resumes: approve goes to the executor, reject loops
 back to the analyzer up to `max_iterations` times.
+
+### Live data
+
+Three of the five sources need **no API key at all**, so a clean clone pulls real
+disruption data:
+
+| Source | Signal | Key |
+|---|---|---|
+| **IMF PortWatch** | Daily AIS chokepoint transits, container port calls, and the GDACS-backed disruptions database | — |
+| **NOAA** | NWS active alerts for the US port states, NHC active tropical cyclones | — |
+| **UN Comtrade** | Year-on-year collapses in bilateral trade flows, via the public preview endpoint | optional |
+| NewsAPI + RSS | Supply-chain headlines, classified and severity-scored | `NEWSAPI_KEY` |
+| OpenWeatherMap | Alerts at the supplier hub coordinates | `OPENWEATHERMAP_API_KEY` |
+
+Fetch on demand — nothing extra to install:
+
+```bash
+curl -X POST localhost:8000/api/v1/ingestion/run      # keyless sources
+curl localhost:8000/api/v1/ingestion/status           # what ran, what is configured
+```
+
+Or set `ENABLE_INGESTION=true` (with `pip install apscheduler`) to run the same
+collectors on a schedule — NOAA every 30 minutes, PortWatch and Comtrade daily.
+
+Ingested events land in the same catalog the monitor agent reads, whether the
+backend is Postgres or memory, and are deduplicated by title so re-polling a
+running storm updates the feed instead of doubling it. The feeds report what they
+measure and nothing more: severity is scored from the alert type and the size of
+the traffic drop, and estimating cost impact remains the simulator's job.
 
 ### Governance tiers
 
@@ -193,4 +222,6 @@ Interactive docs at <http://localhost:8000/docs>.
 | `GET /api/v1/catalog/overview` | Everything the landing view needs |
 | `GET /api/v1/catalog/esg` | Supplier ESG leaderboard |
 | `POST /api/v1/esg/report` | GRI / SASB portfolio report |
+| `GET /api/v1/ingestion/status` | Live sources, which are usable, last run |
+| `POST /api/v1/ingestion/run` | Fetch the live feeds now |
 | `GET /health/` | Status, data backend, LLM provider |

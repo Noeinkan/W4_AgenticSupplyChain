@@ -32,12 +32,21 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
 
-    # External data APIs (optional; ingestion is disabled without them)
+    # External data APIs. IMF PortWatch, NOAA and the Comtrade public preview
+    # need no key at all; these unlock the higher-volume sources.
     comtrade_api_key: str = ""
     openweathermap_api_key: str = ""
     newsapi_key: str = ""
     marine_traffic_api_key: str = ""
     enable_ingestion: bool = False
+
+    # NOAA asks unauthenticated clients to identify themselves; requests with a
+    # generic agent are throttled. An email address is the convention.
+    noaa_user_agent: str = "supply-chain-orchestrator (github.com/agentic-supply-chain)"
+
+    # Cap on live events held in the catalog, so a misbehaving feed cannot grow
+    # it without bound.
+    ingestion_max_events: int = 250
 
     # App settings
     debug: bool = False

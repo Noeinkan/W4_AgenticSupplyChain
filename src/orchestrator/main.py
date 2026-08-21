@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from orchestrator.api.routes import catalog, esg, health, pipeline
+from orchestrator.api.routes import catalog, esg, health, ingestion, pipeline
 from orchestrator.config import settings
 from orchestrator.data import get_catalog
 from orchestrator.llm import provider
@@ -43,18 +43,21 @@ async def lifespan(app: FastAPI):
     scheduler = None
     if settings.enable_ingestion:
         try:
-            from orchestrator.ingestion.scheduler import create_scheduler
+            from orchestrator.ingestion import scheduler as ingestion_scheduler
 
-            scheduler = create_scheduler()
-            scheduler.start()
-            logger.info("Ingestion scheduler started: %s", [j.id for j in scheduler.get_jobs()])
+            scheduler = ingestion_scheduler.create_scheduler()
+            logger.info(
+                "Ingestion scheduler started: %s", ingestion_scheduler.start(scheduler)
+            )
         except Exception as exc:
-            logger.warning("Ingestion disabled (%s)", exc)
+            logger.warning("Ingestion scheduler disabled (%s)", exc)
 
     yield
 
     if scheduler:
-        scheduler.shutdown(wait=False)
+        from orchestrator.ingestion import scheduler as ingestion_scheduler
+
+        ingestion_scheduler.shutdown(scheduler)
     await get_store().shutdown()
     if data.backend == "db":
         from orchestrator.db.engine import engine
@@ -87,6 +90,7 @@ app.include_router(health.router, prefix="/health")
 app.include_router(catalog.router, prefix="/api/v1/catalog")
 app.include_router(pipeline.router, prefix="/api/v1/pipeline")
 app.include_router(esg.router, prefix="/api/v1/esg")
+app.include_router(ingestion.router, prefix="/api/v1/ingestion")
 
 
 @app.get("/", include_in_schema=False)
