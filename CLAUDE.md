@@ -24,10 +24,13 @@ ingestion and any LLM are all optional and guarded at import time.
 | Native streaming pipeline | `src/orchestrator/pipeline/runner.py` |
 | Run store + SSE fan-out | `src/orchestrator/pipeline/store.py` |
 | Data catalog (memory or Postgres) | `src/orchestrator/data/catalog.py` |
+| Commodity families ↔ HS codes | `src/orchestrator/data/commodities.py` |
 | Live source registry | `src/orchestrator/ingestion/collector.py` |
 | Where ingested events land | `src/orchestrator/ingestion/sink.py` |
 | Swappable LLM backend | `src/orchestrator/llm/provider.py` |
 | FastAPI entry | `src/orchestrator/main.py` |
+| Hosted entry (owner login + built bundle) | `src/orchestrator/hosted/app.py` |
+| Deploy config (supplychain.noeinsolutions.com) | `.deploy/`, `deploy.sh` |
 | Settings | `src/orchestrator/config.py` |
 | Optional LangGraph binding | `src/orchestrator/agents/graph.py` |
 | Charts (hand-built SVG) | `web/src/components/charts.jsx` |

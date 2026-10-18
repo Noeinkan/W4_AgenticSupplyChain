@@ -6,6 +6,11 @@ async function request(path, options = {}) {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
+  // Hosted builds sit behind the owner login; an expired session goes back to it.
+  if (res.status === 401) {
+    window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname)}`);
+    throw new Error("Signed out");
+  }
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`;
     try {

@@ -1,0 +1,21 @@
+{
+  "slug": "supplychain",
+  "domain": "supplychain.noeinsolutions.com",
+  "repo": "https://github.com/Noeinkan/W4_AgenticSupplyChain.git",
+  "ref": "main",
+
+  "type": "node",
+  "buildCommand": "",
+  "outputDir": "",
+  "spa": false,
+
+  "port": 8000,
+  "healthPath": "/health/",
+  "expectStatus": 200,
+
+  "memLimit": "768m",
+  "maxBody": "4m",
+  "readTimeout": "120s",
+
+  "notes": "The product, behind the owner login. One Python container: uvicorn serves orchestrator.hosted.app, which puts the login gate (src/orchestrator/hosted/login.py) in front of the FastAPI API and the Vite bundle built in the first Docker stage. Type is 'node' only because the pipeline has no Python type; the Dockerfile is custom and ignores BUILD_COMMAND/START_COMMAND. /health/ is the only open path. SITE_LOGIN_EMAIL and SITE_LOGIN_PASSWORD_HASH live in /opt/sites/supplychain/.env (owner-login-push.sh); the app refuses to start without them. Stateless: in-memory catalog, runs and the HITL queue are lost on restart. No LLM key is set, so reasoning is the deterministic fallback; ingestion is off (POST /api/v1/ingestion/run still works on demand). readTimeout 120s covers the SSE run stream, which sends a keepalive every 15s."
+}

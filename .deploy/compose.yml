@@ -1,0 +1,46 @@
+# supplychain — FastAPI + dashboard bundle in one Python container, behind the owner login.
+# Secrets live ONLY in /opt/sites/supplychain/.env (0600, never in git):
+#   SITE_LOGIN_EMAIL, SITE_LOGIN_PASSWORD_HASH  (bin/owner-login-push.sh writes them)
+# Without them the app refuses to start and the health check fails.
+# Optional, same file: LLM_PROVIDER / LLM_MODEL and the matching *_API_KEY.
+services:
+  web:
+    build:
+      # Context is the site directory, not the checkout, so the Dockerfile lives
+      # outside the cloned repo and .dockerignore keeps .env and repo/.git out.
+      context: .
+      dockerfile: Dockerfile
+    image: site-supplychain:${SITE_TAG:-latest}
+    container_name: site-supplychain-web
+    env_file:
+      - .env
+    environment:
+      DATA_BACKEND: memory
+      ENABLE_INGESTION: "false"
+      USE_LANGGRAPH: "false"
+      LOG_LEVEL: INFO
+      CORS_ORIGINS: https://supplychain.noeinsolutions.com
+    networks:
+      - edge
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 768m
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  edge:
+    external: true
