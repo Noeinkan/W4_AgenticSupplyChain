@@ -39,8 +39,9 @@ async def _drive(profile: dict, decision: str | None = "approve") -> PipelineRun
 
 def test_in_memory_catalog_needs_no_database():
     catalog = Catalog.in_memory()
-    assert len(catalog.suppliers) == 12
-    assert len(catalog.routes) == 36
+    assert len(catalog.suppliers) == 32
+    # 14 bulk suppliers (oil, diesel, fertiliser) have no air lane.
+    assert len(catalog.routes) == 32 * 3 - 14
     assert catalog.backend == "memory"
 
 
@@ -184,12 +185,12 @@ async def test_health_reports_configuration(client):
 
 
 async def test_catalog_endpoints(client):
-    assert len((await client.get("/api/v1/catalog/suppliers")).json()) == 12
-    assert len((await client.get("/api/v1/catalog/routes")).json()) == 36
-    assert len((await client.get("/api/v1/catalog/scenarios")).json()) == 5
+    assert len((await client.get("/api/v1/catalog/suppliers")).json()) == 32
+    assert len((await client.get("/api/v1/catalog/routes")).json()) == 82
+    assert len((await client.get("/api/v1/catalog/scenarios")).json()) == 7
 
     overview = (await client.get("/api/v1/catalog/overview")).json()
-    assert overview["supplier_count"] == 12
+    assert overview["supplier_count"] == 32
     assert overview["by_country"]
 
 

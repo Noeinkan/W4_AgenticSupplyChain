@@ -23,6 +23,7 @@ from itertools import groupby
 import httpx
 
 from orchestrator.config import settings
+from orchestrator.data.commodities import watch_codes
 
 logger = logging.getLogger(__name__)
 
@@ -56,12 +57,29 @@ M49_TO_ISO2: dict[str, str] = {
     "616": "PL", "620": "PT", "642": "RO", "702": "SG", "703": "SK", "704": "VN",
     "710": "ZA", "724": "ES", "757": "CH", "764": "TH", "788": "TN", "792": "TR",
     "818": "EG", "826": "GB", "842": "US",
+    # Oil, fertiliser and rare-earth origins
+    "036": "AU", "112": "BY", "368": "IQ", "414": "KW", "566": "NG", "578": "NO",
+    "634": "QA", "643": "RU", "682": "SA", "784": "AE",
 }
 
-# Key HS codes: fashion (61, 62) + electronics (84, 85)
-HS_CODES_FASHION = ["6101", "6104", "6201", "6204"]
-HS_CODES_ELECTRONICS = ["8471", "8542", "8517", "8528"]
-ALL_HS_CODES = HS_CODES_FASHION + HS_CODES_ELECTRONICS
+ALL_HS_CODES = watch_codes()
+MAX_CODES_PER_CALL = 5  # API limit
+
+
+def hs_batches(codes: list[str] | None = None) -> list[list[str]]:
+    codes = codes or ALL_HS_CODES
+    return [codes[i:i + MAX_CODES_PER_CALL] for i in range(0, len(codes), MAX_CODES_PER_CALL)]
+
+
+def keyless_batch(today: datetime | None = None) -> list[str]:
+    """
+    The one batch the keyless path polls today.
+
+    Annual data changes once a year, so walking the batches one per day covers
+    every family within a week without queueing minutes of throttled requests.
+    """
+    batches = hs_batches()
+    return batches[(today or datetime.now(UTC)).toordinal() % len(batches)]
 
 DROP_THRESHOLD = 0.20
 MIN_FLOW_VALUE_USD = 1_000_000
@@ -118,7 +136,7 @@ async def _fetch_period(reporter_code: str, hs_codes: list[str], period: str) ->
         "clCode": "HS",
         "period": period,
         "reporterCode": reporter_code,
-        "cmdCode": ",".join(hs_codes[:5]),  # API limit: 5 per call
+        "cmdCode": ",".join(hs_codes[:MAX_CODES_PER_CALL]),
         "flowCode": "M",
     }
     if keyed:
@@ -215,9 +233,9 @@ async def fetch_all_anomalies() -> list[dict]:
 
     Without a key this is deliberately narrow: the preview endpoint throttles
     anonymous callers to roughly a request a minute, so only the reporters in
-    ``PUBLIC_REPORTER_CODES`` are polled, spaced out, and a throttled cycle simply
-    yields nothing rather than failing. Set ``COMTRADE_API_KEY`` (free) to widen
-    it to every reporter and drop the pacing.
+    ``PUBLIC_REPORTER_CODES`` are polled, for one HS batch a day, spaced out, and a
+    throttled cycle simply yields nothing rather than failing. Set
+    ``COMTRADE_API_KEY`` (free) to poll every reporter and every batch each run.
     """
     import asyncio
 
@@ -227,17 +245,18 @@ async def fetch_all_anomalies() -> list[dict]:
     all_flows: list[dict] = []
     if keyed:
         results = await asyncio.gather(
-            *[fetch_trade_flows(r, ALL_HS_CODES[:5]) for r in reporters],
+            *[fetch_trade_flows(r, batch) for r in reporters for batch in hs_batches()],
             return_exceptions=True,
         )
         for r in results:
             if isinstance(r, list):
                 all_flows.extend(r)
     else:
+        batch = keyless_batch()
         for index, reporter in enumerate(reporters):
             if index:
                 await asyncio.sleep(PUBLIC_REQUEST_SPACING_S)
-            all_flows.extend(await fetch_trade_flows(reporter, ALL_HS_CODES[:5]))
+            all_flows.extend(await fetch_trade_flows(reporter, batch))
 
     anomalies = detect_trade_anomalies(all_flows)
     logger.info(

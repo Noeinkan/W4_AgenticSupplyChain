@@ -64,7 +64,30 @@ SCENARIO_TEMPLATES: dict[str, dict] = {
         "capacity_reduction": {"country": "US", "range": [0.0, 0.0]},
         "duration_days_range": [7, 45],
     },
+    "hormuz_disruption": {
+        "id": "hormuz_disruption",
+        "name": "Strait of Hormuz Disruption",
+        "event_type": "geopolitical",
+        # War-risk insurance and freight on exposed lanes, not a duty.
+        "tariff_shock": {"country": "ALL", "rate_range": [0.15, 0.60]},
+        "weather_impact": {"region": "GULF", "delay_multiplier_range": [1.2, 2.0]},
+        "demand_shock": {"change_range": [0.0, 0.10]},  # precautionary buying
+        "port_closure_probability": 0.35,
+        "capacity_reduction": {"country": "NONE", "range": [0.0, 0.0]},
+    },
+    "china_export_controls": {
+        "id": "china_export_controls",
+        "name": "China Critical-Mineral Export Controls",
+        "event_type": "tariff",
+        "tariff_shock": {"country": "CN", "rate_range": [0.0, 0.0]},
+        "weather_impact": {"region": "CN", "delay_multiplier_range": [1.0, 1.3]},
+        "demand_shock": {"change_range": [0.0, 0.10]},
+        "port_closure_probability": 0.0,
+        "capacity_reduction": {"country": "CN", "range": [0.40, 0.90]},
+    },
 }
+
+_GULF = ("SA", "IQ", "AE", "QA", "KW")
 
 
 def select_relevant_scenarios(
@@ -80,6 +103,8 @@ def select_relevant_scenarios(
     - geopolitical events with severity ≥ 4 → suez_canal_blockage
     - TW/KR risk > 0.3 or 'semiconductor' in events → semiconductor_shortage
     - US strike events → west_coast_port_strike
+    - Gulf risk > 0.3 or 'hormuz'/'tanker' in events → hormuz_disruption
+    - 'rare earth' or export-control wording in events → china_export_controls
 
     Always returns at least 1 scenario.
     """
@@ -107,6 +132,13 @@ def select_relevant_scenarios(
 
     if "strike" in event_types or "port strike" in event_descriptions:
         selected.append(SCENARIO_TEMPLATES["west_coast_port_strike"])
+
+    gulf_risk = max(risk_scores.get(c, 0) for c in _GULF)
+    if gulf_risk > 0.3 or "hormuz" in event_descriptions or "tanker" in event_descriptions:
+        selected.append(SCENARIO_TEMPLATES["hormuz_disruption"])
+
+    if any(k in event_descriptions for k in ("rare-earth", "rare earth", "export licen", "export control")):
+        selected.append(SCENARIO_TEMPLATES["china_export_controls"])
 
     # Deduplicate by id
     seen: set[str] = set()

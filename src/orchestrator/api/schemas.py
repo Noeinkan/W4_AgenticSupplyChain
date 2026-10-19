@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-Industry = Literal["fashion", "electronics", "automotive", "pharma", "other"]
+Industry = Literal["fashion", "electronics", "automotive", "pharma", "energy", "agriculture", "other"]
 
 
 # -- Pipeline ------------------------------------------------------------------

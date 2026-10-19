@@ -21,6 +21,7 @@ import time
 from datetime import UTC, datetime
 
 from orchestrator.data.catalog import get_catalog
+from orchestrator.data.commodities import families_of
 from orchestrator.esg.calculator import score_portfolio
 from orchestrator.llm import provider
 from orchestrator.simulation.engine import run_scenario_async
@@ -50,10 +51,9 @@ async def monitor(state: dict, catalog) -> None:
     countries = [c.upper() for c in state["manufacturer_profile"].get("supplier_countries", [])] or catalog.countries()
     hs_codes = state["manufacturer_profile"].get("hs_codes", [])
 
-    relevant = [
-        e for e in catalog.events
-        if not countries or set(e.get("affected_countries", [])) & set(countries)
-    ] or catalog.events
+    relevant = [e for e in catalog.events if _event_relevant(e, countries, hs_codes)] or [
+        e for e in catalog.events if _event_relevant(e, [], hs_codes)
+    ]
 
     baseline = _heuristic_risk(relevant, countries)
     result = await provider.complete_json(
@@ -110,9 +110,12 @@ async def simulator(state: dict, catalog) -> float:
     suppliers = catalog.for_profile(
         state["manufacturer_profile"].get("supplier_countries"), state["manufacturer_profile"].get("hs_codes")
     )
-    # Alternative sources outside the profile are what make a reroute possible.
+    # Alternative sources outside the profile are what make a reroute possible -
+    # but only ones that make the same kind of goods.
     pool_ids = {s["id"] for s in suppliers}
-    suppliers = suppliers + [s for s in catalog.suppliers if s["id"] not in pool_ids]
+    suppliers = suppliers + catalog.alternatives(
+        state["manufacturer_profile"].get("hs_codes"), pool_ids
+    )
 
     demand = max(1, int(state["manufacturer_profile"].get("annual_volume_units", 120_000)) // 12)
     n_iter = min(int(state["manufacturer_profile"].get("n_iterations", 1000)), settings.max_mc_iterations)
@@ -324,6 +327,19 @@ def _heuristic_recommendations(results: dict, affected: list[dict], catalog) -> 
 
     recs.sort(key=lambda r: (r["risk_delta"], r["cost_delta_usd"]))
     return recs
+
+
+def _event_relevant(event: dict, countries: list[str], hs_codes: list[str]) -> bool:
+    """
+    An event tagged with HS codes reaches only profiles in the same commodity
+    family, wherever it happened: a Hormuz tanker alert matters to a refiner
+    whatever its supplier list says, and not at all to a garment buyer. Untagged
+    events keep the plain country match.
+    """
+    tagged = families_of(event.get("affected_hs_codes"))
+    if tagged and hs_codes:
+        return bool(tagged & families_of(hs_codes))
+    return not countries or bool(set(event.get("affected_countries", [])) & set(countries))
 
 
 def _heuristic_risk(events: list[dict], countries: list[str]) -> dict[str, float]:

@@ -121,6 +121,21 @@ const PRESETS = {
     hs_codes: ["8542", "8471"], supplier_countries: ["TW", "KR", "MY", "TH", "JP"],
     annual_volume_units: 300_000, min_esg_score: 70, n_iterations: 2000, max_iterations: 3,
   },
+  refining: {
+    name: "Brightwater Refining", industry: "energy",
+    hs_codes: ["2709"], supplier_countries: ["SA", "IQ", "NG"],
+    annual_volume_units: 6_000_000, min_esg_score: 50, n_iterations: 2000, max_iterations: 3,
+  },
+  agriculture: {
+    name: "Plainsfield Agri Co-op", industry: "agriculture",
+    hs_codes: ["3102", "3104", "3105", "2710"], supplier_countries: ["QA", "EG", "IN", "CA"],
+    annual_volume_units: 960_000, min_esg_score: 55, n_iterations: 2000, max_iterations: 3,
+  },
+  ev_motors: {
+    name: "Voltaic Motors", industry: "automotive",
+    hs_codes: ["2846", "8505"], supplier_countries: ["CN"],
+    annual_volume_units: 9_600_000, min_esg_score: 50, n_iterations: 2000, max_iterations: 3,
+  },
 };
 
 export function SimulateView({ run, events, busy, onStart, onDecide, error }) {
@@ -169,7 +184,7 @@ export function SimulateView({ run, events, busy, onStart, onDecide, error }) {
 
           <label className="field"><span>Industry</span>
             <select value={profile.industry} onChange={set("industry")}>
-              {["fashion", "electronics", "automotive", "pharma", "other"].map((i) =>
+              {["fashion", "electronics", "automotive", "pharma", "energy", "agriculture", "other"].map((i) =>
                 <option key={i} value={i}>{i}</option>)}
             </select></label>
 
@@ -182,7 +197,7 @@ export function SimulateView({ run, events, busy, onStart, onDecide, error }) {
 
           <label className="field"><span>Annual volume (units)</span>
             <input type="number" min="1" value={profile.annual_volume_units} onChange={set("annual_volume_units")} />
-            <span className="hint">Simulated demand is one twelfth of this.</span></label>
+            <span className="hint">Simulated demand is one twelfth of this. Oil, fuel and fertiliser are in tonnes, rare earths in kg.</span></label>
 
           <label className="field"><span>Minimum portfolio ESG: {profile.min_esg_score}</span>
             <input type="range" min="0" max="100" step="1" value={profile.min_esg_score} onChange={set("min_esg_score")} />

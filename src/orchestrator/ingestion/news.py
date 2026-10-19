@@ -6,10 +6,10 @@ Articles are classified, severity-scored, and passed to the embedder.
 import logging
 from datetime import UTC, datetime
 
-import feedparser
 import httpx
 
 from orchestrator.config import settings
+from orchestrator.data.commodities import tag_text
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,10 @@ SUPPLY_CHAIN_QUERIES = [
     "factory closure manufacturing",
     "geopolitical trade embargo",
     "climate flood factory",
+    "diesel shortage refinery",
+    "rare earth export controls",
+    "fertilizer urea potash supply",
+    "oil tanker Hormuz",
 ]
 
 # Free RSS feeds — no API key required
@@ -32,7 +36,8 @@ RSS_FEEDS = [
 ]
 
 _EVENT_TYPE_KEYWORDS: dict[str, list[str]] = {
-    "tariff": ["tariff", "trade war", "sanction", "embargo", "customs duty"],
+    "tariff": ["tariff", "trade war", "sanction", "embargo", "customs duty", "export ban",
+               "export control", "export licen"],
     "weather": ["flood", "typhoon", "hurricane", "cyclone", "drought", "wildfire", "earthquake"],
     "strike": ["strike", "labor action", "walkout", "port workers", "union"],
     "geopolitical": ["war", "conflict", "invasion", "blockade", "geopoliti"],
@@ -61,6 +66,18 @@ def estimate_severity(text: str) -> int:
         if any(k in lower for k in _SEVERITY_KEYWORDS[severity]):
             return severity
     return 1
+
+
+QUERIES_PER_POLL = 4
+
+
+def queries_for_window(now: datetime | None = None) -> list[str]:
+    """Four queries per poll, rotating every 15 minutes so every query gets its turn."""
+    now = now or datetime.now(UTC)
+    window = now.hour * 4 + now.minute // 15
+    start = (window * QUERIES_PER_POLL) % len(SUPPLY_CHAIN_QUERIES)
+    rotated = SUPPLY_CHAIN_QUERIES[start:] + SUPPLY_CHAIN_QUERIES[:start]
+    return rotated[:QUERIES_PER_POLL]
 
 
 async def fetch_newsapi_articles(query: str) -> list[dict]:
@@ -104,6 +121,8 @@ async def fetch_newsapi_articles(query: str) -> list[dict]:
 
 def fetch_rss_feeds() -> list[dict]:
     """Parse free RSS feeds synchronously (feedparser handles HTTP)."""
+    import feedparser
+
     articles = []
     for url in RSS_FEEDS:
         try:
@@ -133,7 +152,7 @@ async def fetch_all_articles() -> list[dict]:
     # Parallel NewsAPI queries
     import asyncio
     results = await asyncio.gather(
-        *[fetch_newsapi_articles(q) for q in SUPPLY_CHAIN_QUERIES[:4]],  # stay within rate limit
+        *[fetch_newsapi_articles(q) for q in queries_for_window()],  # stay within rate limit
         return_exceptions=True,
     )
     for r in results:
@@ -153,6 +172,7 @@ async def fetch_all_articles() -> list[dict]:
             text = a["title"] + " " + a.get("content", "")
             a["event_type"] = classify_event_type(text)
             a["severity"] = estimate_severity(text)
+            a["affected_hs_codes"] = tag_text(text)
             unique.append(a)
 
     logger.info("Fetched %d unique articles from all news sources", len(unique))
